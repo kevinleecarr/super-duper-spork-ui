@@ -2,17 +2,17 @@ import React, {useEffect, useState} from 'react';
 import {
     Stepper,
     Card,
-    NumberInput,
-    TextInput,
     Button,
     Group,
     Box,
     Container,
     ThemeIcon,
     Text,
-    SimpleGrid, Stack, Space, Radio, Checkbox
+    SimpleGrid,
+    Space,
+    Checkbox,
+    Loader
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
 import axios from "axios";
 import { IconTrophy } from '@tabler/icons';
 import {useRouter} from "next/router";
@@ -21,6 +21,8 @@ const CustomerJourney = () => {
     const router = useRouter();
     const [active, setActive] = useState(1);
     const [completed, setCompleted] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [entitledSkus, setEntitledSkus] = useState([]);
     const { id } = router.query;
 
     useEffect(() => {
@@ -28,7 +30,7 @@ const CustomerJourney = () => {
         fetchData();
     }, [router.isReady]);
 
-    const [data, setData] = useState({
+    const [customer, setCustomer] = useState({
         _id: '',
         name: '',
         oktaOrgId: '',
@@ -39,15 +41,25 @@ const CustomerJourney = () => {
 
     const sporkApiBaseUrl = process.env.SPORK_API_BASE_URL;
 
-    const fetchData = async () => {
-         const response = await axios.get(sporkApiBaseUrl + '/api/v1/customers/' + id);
-         if (response.data.oktaOrgId) {
-             setActive(2);
-         }
-         if (response.data.oktaLinkedProductId) {
-             setActive(3);
-         }
-         setData(response.data);
+    async function fetchCustomer() {
+        const response = await axios.get(sporkApiBaseUrl + '/api/v1/customers/' + id);
+        if (response.data.oktaOrgId) {
+            setActive(2);
+        }
+        if (response.data.oktaLinkedProductId) {
+            setActive(3);
+        }
+        setCustomer(response.data);
+    }
+
+    async function fetchEntitledSkus() {
+        const response = await axios.get(sporkApiBaseUrl + '/api/v1/account/entitledSkus');
+        setEntitledSkus(response.data);
+    }
+
+    const fetchData = () => {
+        fetchCustomer();
+        fetchEntitledSkus();
     };
 
     const nextStep = () => {
@@ -58,37 +70,73 @@ const CustomerJourney = () => {
     }
 
     const createOrg = async () => {
-        await axios.post(sporkApiBaseUrl + '/api/v1/orgs', {
-            ...data,
-           customerId : data._id,
-        });
-        console.log('createOrg');
-        await fetchData();
+        setLoading(true);
+        try {
+            await axios.post(sporkApiBaseUrl + '/api/v1/orgs', {
+                ...customer,
+                customerId: customer._id,
+            });
+            console.log('createOrg');
+            await fetchData();
+        } finally {
+            setLoading(false);
+        }
     }
 
     const linkOrg = async () => {
-        await axios.post(sporkApiBaseUrl + '/api/v1/orgs/' + data.oktaOrgId + '/link', {
-            ...data,
-            customerId : data._id,
-        });
-        console.log('linkOrg');
-        await fetchData();
+        setLoading(true);
+        try {
+            await axios.post(sporkApiBaseUrl + '/api/v1/orgs/' + customer.oktaOrgId + '/link', {
+                ...customer,
+                customerId: customer._id,
+            });
+            console.log('linkOrg');
+            await fetchData();
+        } finally {
+            setLoading(false);
+        }
     }
 
     const assignSKUs = async () => {
-        console.log('assignSKUs');
-        await axios.put(sporkApiBaseUrl + '/api/v1/customers/' + data._id, data);
-        await fetchData();
-        nextStep();
+        setLoading(true);
+
+        try {
+            console.log('assignSKUs');
+            await axios.put(
+              sporkApiBaseUrl + '/api/v1/customers/' + customer._id,
+              customer
+            );
+            await fetchData();
+
+            await axios.put(
+              sporkApiBaseUrl + '/api/v1/orgs/' + customer.oktaOrgId + '/skus',
+              customer.oktaSkus
+            );
+
+            nextStep();
+        } finally {
+            setLoading(false);
+        }
     }
 
     const setSkus = async (value: any) => {
-        data.oktaSkus = value;
+        customer.oktaSkus = value;
     }
 
     function reassignSKUs() {
         setActive((current:number) => current - 1);
     }
+
+    const skuCheckboxes = entitledSkus?.map((sku: any) => {
+        return (
+            <Checkbox
+                key={sku.id}
+                label={sku.name}
+                value={sku.id}
+                onChange={setSkus}
+            />
+        );
+    });
 
     return (
     <Container size="lg" p="md">
@@ -105,17 +153,20 @@ const CustomerJourney = () => {
                         <SimpleGrid cols={2}>
                             <Box>
                                 <Text weight={500}>Name:</Text>
-                                <Text>{data.name}</Text>
+                                <Text>{customer.name}</Text>
                             </Box>
                             <Box>
                                 <Text weight={500}>Subdomain:</Text>
-                                <Text>{data.subdomain}</Text>
+                                <Text>{customer.subdomain}</Text>
                             </Box>
                         </SimpleGrid>
                         </Card>
                     </Container>
                     <Group position="center" mt="xl">
-                        <Button onClick={createOrg}>Create Org</Button>
+                        {loading
+                          ? (<Loader size="sm"/>)
+                          : (<Button onClick={createOrg}>Create Org</Button>)
+                        }
                     </Group>
                 </Stepper.Step>
                 <Stepper.Step label="Link" description="Link Org to Account Service">
@@ -126,21 +177,24 @@ const CustomerJourney = () => {
                             <SimpleGrid cols={2}>
                                 <Box>
                                     <Text weight={500}>Name:</Text>
-                                    <Text>{data.name}</Text>
+                                    <Text>{customer.name}</Text>
                                 </Box>
                                 <Box>
                                     <Text weight={500}>Subdomain:</Text>
-                                    <Text>{data.subdomain}</Text>
+                                    <Text>{customer.subdomain}</Text>
                                 </Box>
                                 <Box>
                                     <Text weight={500}>Okta Org Id:</Text>
-                                    <Text>{data.oktaOrgId}</Text>
+                                    <Text>{customer.oktaOrgId}</Text>
                                 </Box>
                             </SimpleGrid>
                         </Card>
                     </Container>
                     <Group position="center" mt="xl">
-                        <Button onClick={linkOrg}>Link Org</Button>
+                        {loading
+                          ? (<Loader size="sm"/>)
+                          : (<Button onClick={linkOrg}>Link Org</Button>)
+                        }
                     </Group>
                 </Stepper.Step>
                 <Stepper.Step label="SKUs" description="Select SKUs" completedIcon={<IconTrophy />} color={completed? "yellow" : undefined}>
@@ -151,40 +205,39 @@ const CustomerJourney = () => {
                             <SimpleGrid cols={2}>
                                 <Box>
                                     <Text weight={500}>Name:</Text>
-                                    <Text>{data.name}</Text>
+                                    <Text>{customer.name}</Text>
                                 </Box>
                                 <Box>
                                     <Text weight={500}>Subdomain:</Text>
-                                    <Text>{data.subdomain}</Text>
+                                    <Text>{customer.subdomain}</Text>
                                 </Box>
                                 <Box>
                                     <Text weight={500}>Okta Org Id:</Text>
-                                    <Text>{data.oktaOrgId}</Text>
+                                    <Text>{customer.oktaOrgId}</Text>
                                 </Box>
                                 <Box>
                                     <Text weight={500}>Linked Product Id:</Text>
-                                    <Text>{data.oktaLinkedProductId}</Text>
+                                    <Text>{customer.oktaLinkedProductId}</Text>
                                 </Box>
                                 <Box>
                                     <Text weight={500}>Skus:</Text>
                                     <Checkbox.Group
                                         orientation="vertical"
-                                        defaultValue={data.oktaSkus}
+                                        defaultValue={customer.oktaSkus}
                                         onChange={setSkus}
                                         withAsterisk
                                     >
-                                        <Checkbox value="sso" label="Workforce SSO" />
-                                        <Checkbox value="mfa" label="Workforce MFA" />
+                                        {skuCheckboxes}
                                     </Checkbox.Group>
                                 </Box>
                             </SimpleGrid>
                         </Card>
                     </Container>
                     <Group position="center" mt="xl">
-                        Step 3: Assign SKUs
-                    </Group>
-                    <Group position="center" mt="xl">
-                        <Button onClick={assignSKUs}>Assign SKUs</Button>
+                        {loading
+                          ? (<Loader size="sm"/>)
+                          : (<Button onClick={assignSKUs}>Assign SKUs</Button>)
+                        }
                     </Group>
                 </Stepper.Step>
                 <Stepper.Completed>

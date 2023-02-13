@@ -6,12 +6,20 @@ import {openModal} from "@mantine/modals";
 import {confirmDelete} from "@/components/genericComponents/confirmDelete";
 
 interface Props {
+    transformer?: (data: any) => any;
     name: string;
     endpoint: string;
     columns: { name: string; key: string }[];
 }
 
-export const DataList: React.FC<Props> = ({ name, endpoint, columns }) => {
+export const DataList: React.FC<Props> = (
+  {
+      transformer,
+      name,
+      endpoint,
+      columns
+  }
+) => {
     const [data, setData] = useState([]);
 
     useEffect(() => {
@@ -19,8 +27,8 @@ export const DataList: React.FC<Props> = ({ name, endpoint, columns }) => {
     }, []);
 
     const fetchData = async () => {
-        const response = await axios(endpoint);
-        setData(response.data);
+        const response = await axios.get(endpoint);
+        setData(transformer ? transformer(response.data) : response.data);
     };
 
     const column = (name:string) => {
